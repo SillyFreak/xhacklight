@@ -18,6 +18,29 @@ fn usage() -> ! {
     process::exit(1);
 }
 
+/// Returns the brightness values down and up from the given brightness,
+/// taking brightness limits into account:
+/// if the given brightness is the lowest (highest) possible,
+/// the value returned for decreasing (increasing) brightness will just be the
+/// lowest (highest) possible value.
+fn get_smart_steps(brightness: u32) -> (u32, u32) {
+    let index = SMART_STEPS.binary_search(&brightness);
+    let (down_index, up_index) = index.map_or_else(
+        // the value to the right is at the insert index
+        // the value to the left is left of that
+        |insert_index| (insert_index.saturating_sub(1), insert_index),
+        // take the indices around the found index
+        |index| (index.saturating_sub(1), index + 1),
+    );
+
+    // make sure that the up_index is not out of bounds
+    // for the down_index that's the case because it's unsigned
+    // and we used saturating_sub
+    let up_index = std::cmp::min(up_index, SMART_STEPS.len() - 1);
+
+    (SMART_STEPS[down_index], SMART_STEPS[up_index])
+}
+
 fn get_brightness() -> Result<u32> {
     let brightness = fs::read_to_string(BRIGHTNESS_FILE)
         .context(format!("could not read file {}", BRIGHTNESS_FILE))?;
@@ -61,28 +84,8 @@ fn adjust_brightness(adjustment: Adjustment) -> Result<()> {
             }
             Adjustment::Inc(change) => brightness.saturating_add(change),
             Adjustment::Dec(change) => brightness.saturating_sub(change),
-            Adjustment::SmartInc => {
-                let index = SMART_STEPS.binary_search(&brightness);
-                let index = index.map_or_else(
-                    // the insert index is to the right of the current value
-                    |insert_index| insert_index,
-                    // take the index of the value to the right
-                    |index| index + 1,
-                );
-                // make sure that the index is not out of bounds
-                let index = std::cmp::min(index, SMART_STEPS.len() - 1);
-                SMART_STEPS[index]
-            }
-            Adjustment::SmartDec => {
-                let index = SMART_STEPS.binary_search(&brightness);
-                let index = index.map_or_else(
-                    // the insert index is to the right of the current value; go one to the left
-                    |insert_index| insert_index.saturating_sub(1),
-                    // take the index of the value to the left
-                    |index| index.saturating_sub(1),
-                );
-                SMART_STEPS[index]
-            }
+            Adjustment::SmartInc => get_smart_steps(brightness).1,
+            Adjustment::SmartDec => get_smart_steps(brightness).0,
         }
     };
 
